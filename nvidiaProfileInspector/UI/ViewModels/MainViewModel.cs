@@ -3,6 +3,7 @@ namespace nvidiaProfileInspector.UI.ViewModels
     using nvidiaProfileInspector;
     using nvidiaProfileInspector.Common;
     using nvidiaProfileInspector.Common.Helper;
+    using nvidiaProfileInspector.Common.Meta;
     using nvidiaProfileInspector.Common.Updates;
     using nvidiaProfileInspector.Native.NVAPI2;
     using nvidiaProfileInspector.Native.WINAPI;
@@ -675,6 +676,8 @@ namespace nvidiaProfileInspector.UI.ViewModels
                 if (!string.IsNullOrEmpty(altNamesToCheck) &&
                     altNamesToCheck.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0)
                     return true;
+                if (item.SettingIdHex.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
             }
             return false;
         }
@@ -687,8 +690,8 @@ namespace nvidiaProfileInspector.UI.ViewModels
                 return;
             }
 
-            var meta = _metaService.GetSettingMeta(_selectedSetting.SettingId, GetSettingViewMode());
-            var description = DlssHelper.ReplaceDlssVersions(meta?.Description ?? "");
+            var description = _metaService.GetDescription(_selectedSetting.SettingId);
+            description = DlssHelper.ReplaceDlssVersions(description ?? "");
             if (!string.IsNullOrEmpty(_selectedSetting.AlternateNames))
                 description = $"Alternate names: {_selectedSetting.AlternateNames}\r\n{description}";
 
@@ -704,11 +707,9 @@ namespace nvidiaProfileInspector.UI.ViewModels
             if (item == null)
                 return true;
 
-            var settingMeta = _metaService.GetSettingMeta(item.SettingId, GetSettingViewMode());
-            var settingType = settingMeta?.SettingType;
-
-            if (settingType == NVDRS_SETTING_TYPE.NVDRS_DWORD_TYPE)
+            if (item.DwordValues != null)
             {
+                var settingMeta = new SettingMeta { DwordValues = item.DwordValues };
                 if (DrsUtil.TryParseDwordSettingValue(settingMeta, item.SelectedValue, out _))
                     return true;
 
@@ -716,8 +717,19 @@ namespace nvidiaProfileInspector.UI.ViewModels
                 return false;
             }
 
-            if (settingType == NVDRS_SETTING_TYPE.NVDRS_BINARY_TYPE)
+            if (item.QwordValues != null)
             {
+                var settingMeta = new SettingMeta { QwordValues = item.QwordValues };
+                if (DrsUtil.TryParseQwordSettingValue(settingMeta, item.SelectedValue, out _))
+                    return true;
+
+                errorMessage = "Enter a valid QWORD value.";
+                return false;
+            }
+
+            if (item.BinaryValues != null)
+            {
+                var settingMeta = new SettingMeta { BinaryValues = item.BinaryValues };
                 if (DrsUtil.ParseBinarySettingValue(settingMeta, item.SelectedValue) != null)
                     return true;
 
@@ -815,6 +827,7 @@ namespace nvidiaProfileInspector.UI.ViewModels
                 var vm = new SettingItemViewModel(item);
                 var meta = _metaService.GetSettingMeta(item.SettingId, GetSettingViewMode());
                 vm.DwordValues = meta?.DwordValues;
+                vm.QwordValues = meta?.QwordValues;
                 vm.StringValues = meta?.StringValues;
                 vm.BinaryValues = meta?.BinaryValues;
                 tempSettings.Add(vm);
@@ -1059,6 +1072,15 @@ namespace nvidiaProfileInspector.UI.ViewModels
             "", true, (val) =>
             {
                 if (string.IsNullOrWhiteSpace(val)) return "Expected a filename, UWP ID, or absolute path.";
+                string findFileStr = "FindFile=";
+                int findFileIndex = val.IndexOf(findFileStr, StringComparison.OrdinalIgnoreCase);
+                if (findFileIndex >= 0)
+                {
+                    string appName = val.Substring(0, findFileIndex).Trim().Trim('"');
+                    string findFile = val.Substring(findFileIndex + findFileStr.Length).Trim().Trim('"');
+                    if (string.IsNullOrWhiteSpace(appName) || string.IsNullOrWhiteSpace(findFile))
+                        return "Expected a valid filename and FindFile string.";
+                }
                 return null;
             });
             dialog.Owner = App.Current.MainWindow;
@@ -1067,7 +1089,25 @@ namespace nvidiaProfileInspector.UI.ViewModels
             {
                 try
                 {
-                    _settingService.AddApplication(_currentProfile, dialog.InputValue);
+                    string findFileStr = "FindFile=";
+                    int findFileIndex = dialog.InputValue.IndexOf(findFileStr, StringComparison.OrdinalIgnoreCase);
+
+                    if (findFileIndex >= 0)
+                    {
+                        string appName = dialog.InputValue.Substring(0, findFileIndex).Trim().Trim('"');
+                        string findFile = dialog.InputValue.Substring(findFileIndex + findFileStr.Length).Trim().Trim('"');
+                        if (string.IsNullOrWhiteSpace(appName) || string.IsNullOrWhiteSpace(findFile))
+                        {
+                            OnShowError?.Invoke("Invalid application name or FindFile string.");
+                            return;
+                        }
+                        _settingService.AddApplication(_currentProfile, appName, findFile);
+                    }
+                    else
+                    {
+                        _settingService.AddApplication(_currentProfile, dialog.InputValue);
+                    }
+
                     RefreshCurrentProfile();
                 }
                 catch (Exception ex)
@@ -1289,6 +1329,9 @@ namespace nvidiaProfileInspector.UI.ViewModels
 
         public void SelectProfile(string profileName)
         {
+            if (string.Equals(profileName, _baseProfileName, StringComparison.OrdinalIgnoreCase))
+                profileName = DrsSettingsService.GlobalProfileName;
+
             if (_profileNames.Any(x => x.ProfileName == profileName))
                 SetCurrentProfile(profileName, forceNotify: true);
         }

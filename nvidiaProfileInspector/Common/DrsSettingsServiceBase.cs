@@ -140,6 +140,26 @@ namespace nvidiaProfileInspector.Common
 
         }
 
+        protected void StoreQwordValue(IntPtr hSession, IntPtr hProfile, uint settingId, ulong qwordValue)
+        {
+            var newSetting = new NVDRS_SETTING()
+            {
+                version = nvw.NVDRS_SETTING_VER,
+                settingId = settingId,
+                settingType = NVDRS_SETTING_TYPE.NVDRS_QWORD_TYPE,
+                settingLocation = NVDRS_SETTING_LOCATION.NVDRS_CURRENT_PROFILE_LOCATION,
+                currentValue = new NVDRS_SETTING_UNION()
+                {
+                    qwordValue = qwordValue,
+                },
+            };
+
+            var ssRes = nvw.Instance.DRS_SetSetting(hSession, hProfile, ref newSetting);
+            if (ssRes != NvAPI_Status.NVAPI_OK)
+                throw new NvapiException("DRS_SetSetting", ssRes);
+
+        }
+
         protected void StoreStringValue(IntPtr hSession, IntPtr hProfile, uint settingId, string stringValue)
         {
             var newSetting = new NVDRS_SETTING()
@@ -225,6 +245,21 @@ namespace nvidiaProfileInspector.Common
 
         }
 
+        protected void AddApplication(IntPtr hSession, IntPtr hProfile, string applicationName, string fileInFolder)
+        {
+            var newApp = new NVDRS_APPLICATION_V4()
+            {
+                version = nvw.NVDRS_APPLICATION_VER_V4,
+                appName = applicationName,
+                fileInFolder = fileInFolder
+            };
+
+            var caRes = nvw.Instance.DRS_CreateApplication(hSession, hProfile, ref newApp);
+            if (caRes != NvAPI_Status.NVAPI_OK)
+                throw new NvapiException("DRS_CreateApplication", caRes);
+
+        }
+
         protected void DeleteApplication(IntPtr hSession, IntPtr hProfile, NVDRS_APPLICATION_V4 application)
         {
             var caRes = nvw.Instance.DRS_DeleteApplicationEx(hSession, hProfile, ref application);
@@ -257,9 +292,9 @@ namespace nvidiaProfileInspector.Common
             return profileHandles;
         }
 
-        protected List<NVDRS_SETTING> GetProfileSettings(IntPtr hSession, IntPtr hProfile)
+        protected List<NVDRS_SETTING> GetProfileSettings(IntPtr hSession, IntPtr hProfile, uint expectedCount = 512)
         {
-            uint settingCount = 512;
+            uint settingCount = expectedCount > 0 ? expectedCount : 1;
             var settings = new NVDRS_SETTING[settingCount];
             settings[0].version = NvapiDrsWrapper.NVDRS_SETTING_VER;
 
